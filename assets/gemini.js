@@ -1,6 +1,6 @@
 import { store } from "./store.js";
 
-function model(){ return "gemini-1.5-pro"; }
+function model(){ return store.getModel(); }
 
 function baseRules(story){
   const pov = story.firstPerson ? "PRIMEIRA PESSOA (eu, meu, minha)" : "TERCEIRA PESSOA";

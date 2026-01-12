@@ -1,6 +1,7 @@
 const LS_DB = "historia.db.v3";
 const LS_LICENSE = "historia.licenseKey";
 const LS_AUDIO = "historia.audioSettings";
+const LS_MODEL = "historia.model";
 
 function nowIso(){ return new Date().toISOString(); }
 function rid(){
@@ -20,6 +21,9 @@ function writeDb(db){ localStorage.setItem(LS_DB, JSON.stringify(db)); }
 export const store = {
   getLicense(){ return localStorage.getItem(LS_LICENSE) || ""; },
   setLicense(v){ if (!v) localStorage.removeItem(LS_LICENSE); else localStorage.setItem(LS_LICENSE, v); },
+
+  getModel(){ return localStorage.getItem(LS_MODEL) || "gemini-2.0-flash"; },
+  setModel(v){ if (!v) localStorage.removeItem(LS_MODEL); else localStorage.setItem(LS_MODEL, v); },
 
   getAudioSettings(){
     try{

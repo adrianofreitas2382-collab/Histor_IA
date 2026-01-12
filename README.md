@@ -1,31 +1,20 @@
-# HistorIA 3.0 (Static / GitHub Pages)
+# HistorIA 3.0 — Static (GitHub Pages)
 
-Este pacote é **100% estático**: basta descompactar e abrir o `index.html` no navegador.
-Para publicar no GitHub, use **GitHub Pages** (não requer Node, build ou servidor).
+Este pacote é **100% estático** (somente arquivos HTML/CSS/JS).
+Você pode:
+- abrir `index.html` diretamente no navegador, ou
+- publicar no **GitHub Pages**.
 
-## Como usar (local)
-1. Abra `index.html` no navegador.
-2. Vá em **Termos e Condições** e insira a **Licença de Uso (Gemini)**.
-3. Volte em **Criar História** e inicie.
+## Uso local
+1. Abra `index.html`.
+2. Vá em **Termos** e salve a **Licença de Uso (Gemini)**.
+3. (Opcional) Em **Controles**, escolha o **Modelo (Gemini)**.
+4. Inicie a história.
 
-## Como publicar no GitHub Pages
-1. Envie o conteúdo do ZIP (arquivos) para o repositório.
-2. No GitHub: Settings → Pages →
-   - Source: Deploy from a branch
-   - Branch: `main` / folder: `/ (root)`
-3. Aguarde e acesse a URL do Pages.
+## Publicar no GitHub Pages (somente GitHub)
+1. Suba estes arquivos na raiz do repositório.
+2. GitHub → Settings → Pages → Deploy from a branch → main / (root).
+3. Abra a URL do Pages.
 
-## Importante (chave)
-- A “Licença de Uso” (chave Gemini) é armazenada somente no navegador (localStorage).
-- Não é commitada no GitHub.
-- A chamada ao Gemini é feita diretamente do navegador.
-
-## Regras do produto
-- Até 10 capítulos.
-- Fluxo por capítulo:
-  50% → Escolha 1 (3 opções) → 90% → Escolha 2 (3 opções) → Conclusão
-- Escolhas são irreversíveis.
-- Modo Primeira Pessoa opcional (pode encerrar a história em caso de morte).
-
-Rodapé obrigatório:
-HistorIA - Suas idéias e suas escolhas na sua história!
+## Segurança
+A “Licença de Uso” é armazenada apenas no navegador (localStorage) e não é versionada.
