@@ -97,7 +97,10 @@ ${segmentInstruction(stage)}
 `;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent`;
-  const body = { contents: [{ parts: [{ text: prompt }] }] };
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.9, topP: 0.95, maxOutputTokens: 1200 }
+  };
 
   const res = await fetch(url, {
     method: "POST",

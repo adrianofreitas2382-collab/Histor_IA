@@ -1,9 +1,21 @@
-import { store, createStory, findDuplicate, listStories, getStory, saveStory, deleteStory, addChoice, resetPending, canAdvanceChapter, nextChapterInit } from "./store.js";
+import { store, createStory, findDuplicate, listStories, getStory, saveStory, deleteStory, addChoice, resetPending, canAdvanceChapter, nextChapterInit, addPageSnapshot, getPageById } from "./store.js";
 import { tts } from "./tts.js";
 import { geminiGenerateSegment } from "./gemini.js";
 
 const app = document.getElementById("app");
 const badgeModel = document.getElementById("badgeModel");
+
+function escapeHtml(s="") {
+  return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
+}
+function escapeAttr(s="") {
+  return escapeHtml(s).replace(/"/g, "&quot;");
+}
+function el(html) {
+  const t = document.createElement("template");
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild;
+}
 
 function updateBadge(){
   badgeModel.textContent = `3.0 • Static • ${store.getModel()}`;
@@ -26,19 +38,6 @@ function route() {
 window.addEventListener("hashchange", route);
 window.addEventListener("load", route);
 
-function el(html) {
-  const t = document.createElement("template");
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild;
-}
-
-function escapeHtml(s="") {
-  return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
-}
-function escapeAttr(s="") {
-  return escapeHtml(s).replace(/"/g, "&quot;");
-}
-
 function renderHome() {
   const s = store.getAudioSettings();
   app.innerHTML = "";
@@ -52,13 +51,13 @@ function renderHome() {
         </p>
 
         <label>Título</label>
-        <input id="title" placeholder="Ex.: Operação Céu Limpo" />
+        <input id="title" placeholder="Defina um título curto e marcante" />
 
         <label>Breve enredo (premissa)</label>
         <textarea id="premise" placeholder="Descreva em 2–5 linhas o ponto de partida da história"></textarea>
 
         <label>Núcleos desejados (separe por ponto e vírgula)</label>
-        <input id="nuclei" placeholder="Ex.: Investigação; Conflito moral; Ação tática; Drama humano" />
+        <input id="nuclei" placeholder="Liste núcleos separados por ponto e vírgula" />
 
         <div class="split">
           <div>
@@ -104,21 +103,19 @@ function renderHome() {
           <li>Gemini como núcleo narrativo único.</li>
           <li>Persistência local em <b>localStorage</b>.</li>
           <li>Sem build/servidor: pronto para GitHub Pages.</li>
-          <li>Chave inserida como <b>Licença de Uso</b> em Termos.</li>
+          <li>Livro: páginas e escolhas ficam registradas.</li>
         </ul>
       </div>
     </div>
   `));
 
-  const license = store.getLicense();
-  if (!license) app.querySelector("#licenseNotice").style.display = "block";
+  if (!store.getLicense()) app.querySelector("#licenseNotice").style.display = "block";
 
   app.querySelector("#start").addEventListener("click", async () => {
     const err = app.querySelector("#err");
     err.textContent = "";
 
-    const apiKey = store.getLicense();
-    if (!apiKey) {
+    if (!store.getLicense()) {
       err.textContent = "Insira a Licença de Uso em Termos e Condições antes de iniciar.";
       return;
     }
@@ -134,12 +131,8 @@ function renderHome() {
 
     if (!payload.premise) { err.textContent = "Premissa é obrigatória."; return; }
 
-    // Evita duplicidade: se existir uma ativa com os mesmos dados, apenas abre
     const dup = findDuplicate(payload);
-    if (dup) {
-      location.hash = `#/story/${dup.storyId}`;
-      return;
-    }
+    if (dup) { location.hash = `#/story/${dup.storyId}`; return; }
 
     const story = createStory(payload);
     saveStory(story);
@@ -155,11 +148,14 @@ function renderHome() {
       story.pendingChoiceAt = 1;
       story.stage = 50;
 
+      addPageSnapshot(story, `Capítulo ${story.chapter} • 50%`);
+
       if (store.deathHeuristic(story, seg.text)) {
         story.status = "ended";
         story.pendingChoices = null;
         story.pendingChoiceAt = null;
         story.stage = 100;
+        addPageSnapshot(story, `Capítulo ${story.chapter} • Encerrada`);
       }
 
       saveStory(story);
@@ -178,18 +174,18 @@ function renderStories() {
   const root = el(`
     <div class="card">
       <h2 class="title">Minhas Histórias</h2>
-      <p class="muted">Sem edição. Você pode continuar ou ver detalhes.</p>
+      <p class="muted">Sem edição. Você pode continuar, ver detalhes e ler páginas anteriores.</p>
       <div class="hr"></div>
       <div id="list"></div>
     </div>
   `);
-  const list = root.querySelector("#list");
 
+  const list = root.querySelector("#list");
   if (items.length === 0) {
     list.appendChild(el(`<p class="muted">Nenhuma história criada ainda.</p>`));
   } else {
     items.forEach(s => {
-      const d = el(`
+      list.appendChild(el(`
         <div class="card" style="padding:18px; margin-bottom:14px;">
           <div class="row" style="justify-content:space-between;">
             <div>
@@ -204,12 +200,10 @@ function renderStories() {
           </div>
           <div class="error" data-err="${s.storyId}" style="margin-top:10px;"></div>
         </div>
-      `);
-      list.appendChild(d);
+      `));
     });
   }
 
-  // Atualizar: se estágio == 0, tenta gerar 50% inicial. Caso contrário, apenas recarrega estado.
   root.querySelectorAll('button[data-action="refresh"]').forEach(btn => {
     btn.addEventListener("click", async () => {
       const storyId = btn.dataset.id;
@@ -219,6 +213,7 @@ function renderStories() {
       if (!story) return;
 
       if (story.stage === 0 && story.status === "active") {
+        if (!store.getLicense()) { errEl.textContent = "Defina a Licença de Uso em Termos."; return; }
         try{
           btn.disabled = true;
           btn.textContent = "Gerando...";
@@ -227,6 +222,7 @@ function renderStories() {
           story.pendingChoices = seg.choices;
           story.pendingChoiceAt = 1;
           story.stage = 50;
+          addPageSnapshot(story, `Capítulo ${story.chapter} • 50%`);
           saveStory(story);
           location.hash = `#/story/${storyId}`;
         } catch(e){
@@ -236,7 +232,6 @@ function renderStories() {
           btn.textContent = "Atualizar";
         }
       } else {
-        // apenas recarrega listagem (força rerender)
         renderStories();
       }
     });
@@ -279,10 +274,10 @@ function renderControls() {
       <label>Modelo Gemini</label>
       <select id="model">
         ${[
+          "gemini-2.5-flash",
           "gemini-2.0-flash",
           "gemini-2.0-flash-lite",
-          "gemini-flash-latest",
-          "gemini-2.5-flash"
+          "gemini-flash-latest"
         ].map(m => `<option value="${m}" ${m===currentModel?"selected":""}>${m}</option>`).join("")}
       </select>
       <p class="muted">Modelo atual: <b id="modelV">${escapeHtml(currentModel)}</b></p>
@@ -384,6 +379,12 @@ function renderStory(storyId) {
   const story = getStory(storyId);
   if (!story) { location.hash = "#/stories"; return; }
 
+  story.pages = Array.isArray(story.pages) ? story.pages : [];
+  if ((story.fullText || "").trim() && story.pages.length === 0) {
+    addPageSnapshot(story, `Capítulo ${story.chapter} • ${story.stage}%`);
+    saveStory(story);
+  }
+
   app.innerHTML = "";
   const root = el(`
     <div class="grid">
@@ -404,6 +405,14 @@ function renderStory(storyId) {
           <button class="btn secondary" id="refresh">Atualizar</button>
           <button class="btn" id="narrate">Narrar</button>
           <button class="btn secondary" id="stop">Parar</button>
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <div style="flex:1; min-width:280px;">
+            <label style="margin:0 0 6px;">Leitura (páginas)</label>
+            <select id="pageSel"></select>
+            <div class="muted" style="margin-top:10px;">Ao selecionar uma página anterior, a leitura é apenas consultiva.</div>
+          </div>
         </div>
 
         <div class="error" id="err" style="margin-top:12px;"></div>
@@ -440,9 +449,36 @@ function renderStory(storyId) {
 
   const err = root.querySelector("#err");
   const textBox = root.querySelector("#text");
+  const pageSel = root.querySelector("#pageSel");
+  let viewPageId = "CURRENT";
+
+  function refreshPageOptions(){
+    pageSel.innerHTML = "";
+    const cur = document.createElement("option");
+    cur.value = "CURRENT";
+    cur.textContent = `Atual (Cap ${story.chapter} • ${story.stage}%)`;
+    pageSel.appendChild(cur);
+
+    story.pages.forEach(p => {
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = `${p.label} • ${new Date(p.at).toLocaleString()}`;
+      pageSel.appendChild(o);
+    });
+
+    pageSel.value = viewPageId;
+  }
+
+  pageSel.addEventListener("change", ()=>{
+    viewPageId = pageSel.value;
+    renderText();
+    renderControls();
+  });
 
   function renderText() {
-    const parts = store.splitSentences(story.fullText || "");
+    const page = (viewPageId !== "CURRENT") ? getPageById(story, viewPageId) : null;
+    const sourceText = page ? page.text : (story.fullText || "");
+    const parts = store.splitSentences(sourceText);
     textBox.innerHTML = "";
     parts.forEach((p, i) => {
       const span = document.createElement("span");
@@ -451,36 +487,52 @@ function renderStory(storyId) {
       textBox.appendChild(span);
     });
   }
+
   function setHighlight(idx) {
     [...textBox.querySelectorAll("span")].forEach(s => s.classList.remove("hl"));
     const e = textBox.querySelector(`span[data-i="${idx}"]`);
     if (e) e.classList.add("hl");
   }
 
+  function lockChoicesUI(message){
+    const wrap = root.querySelector("#choices");
+    if (wrap) [...wrap.querySelectorAll("button")].forEach(b => { b.disabled = true; });
+    const label = root.querySelector("#pauseLabel");
+    if (label && message) label.textContent = message;
+  }
+
   function renderControls() {
+    const isReadOnly = (viewPageId !== "CURRENT");
+
     const cb = root.querySelector("#choiceBlock");
     const pauseLabel = root.querySelector("#pauseLabel");
     const choices = root.querySelector("#choices");
-    cb.style.display = story.pendingChoices ? "block" : "none";
+
+    cb.style.display = (!isReadOnly && story.pendingChoices) ? "block" : "none";
     choices.innerHTML = "";
-    if (story.pendingChoices) {
+
+    if (!isReadOnly && story.pendingChoices) {
       pauseLabel.textContent = `Pausa ${story.pendingChoiceAt} — escolha uma opção (irreversível):`;
       story.pendingChoices.forEach((c, idx) => {
         const b = el(`<button class="choice">${escapeHtml(c)}</button>`);
-        b.addEventListener("click", () => choose(idx));
+        b.addEventListener("click", () => choose(idx, b));
         choices.appendChild(b);
       });
     }
-    root.querySelector("#nextBlock").style.display = canAdvanceChapter(story) ? "block" : "none";
+
+    root.querySelector("#nextBlock").style.display = (!isReadOnly && canAdvanceChapter(story)) ? "block" : "none";
     root.querySelector("#endedBlock").style.display = (story.status !== "active") ? "block" : "none";
   }
 
   async function choose(index) {
     err.textContent = "";
     tts.stop();
-    const apiKey = store.getLicense();
-    if (!apiKey) { err.textContent = "Insira a Licença de Uso em Termos antes de continuar."; return; }
+
+    if (!store.getLicense()) { err.textContent = "Insira a Licença de Uso em Termos antes de continuar."; return; }
     if (!story.pendingChoices) return;
+
+    // Feedback imediato: desativa as 3 opções e sinaliza processamento
+    lockChoicesUI("Escolha aceita — gerando sequência...");
 
     addChoice(story, index);
     resetPending(story);
@@ -493,31 +545,30 @@ function renderStory(storyId) {
         story.pendingChoices = seg.choices;
         story.pendingChoiceAt = 2;
         story.stage = 90;
-
-        if (store.deathHeuristic(story, seg.text)) {
-          story.status = "ended";
-          story.pendingChoices = null;
-          story.pendingChoiceAt = null;
-          story.stage = 100;
-        }
+        addPageSnapshot(story, `Capítulo ${story.chapter} • 90%`);
       } else if (stageBefore === 90) {
         const seg = await geminiGenerateSegment(story, 90);
         story.fullText = (story.fullText + "\n\n" + seg.text).trim();
         story.stage = 100;
+        addPageSnapshot(story, `Capítulo ${story.chapter} • 100%`);
 
         if (store.deathHeuristic(story, seg.text)) {
           story.status = "ended";
+          addPageSnapshot(story, `Capítulo ${story.chapter} • Encerrada`);
         } else if (story.chapter >= 10) {
           story.status = "completed";
         }
       } else {
         err.textContent = "Estágio inválido para continuar.";
       }
+
       saveStory(story);
+      refreshPageOptions();
       renderText();
       renderControls();
     } catch(e){
       err.textContent = e?.message || "Erro ao chamar Gemini.";
+      renderControls();
     }
   }
 
@@ -525,14 +576,19 @@ function renderStory(storyId) {
     const updated = getStory(storyId);
     if (!updated) return;
     Object.assign(story, updated);
+    story.pages = Array.isArray(story.pages) ? story.pages : [];
+    refreshPageOptions();
     renderText();
     renderControls();
   });
 
   root.querySelector("#narrate").addEventListener("click", ()=>{
-    const parts = store.splitSentences(story.fullText || "");
+    const page = (viewPageId !== "CURRENT") ? getPageById(story, viewPageId) : null;
+    const sourceText = page ? page.text : (story.fullText || "");
+    const parts = store.splitSentences(sourceText);
     tts.speak(parts, (idx)=> setHighlight(idx));
   });
+
   root.querySelector("#stop").addEventListener("click", ()=>{
     tts.stop();
     setHighlight(-1);
@@ -541,9 +597,14 @@ function renderStory(storyId) {
   root.querySelector("#next").addEventListener("click", async ()=>{
     err.textContent = "";
     tts.stop();
-    const apiKey = store.getLicense();
-    if (!apiKey) { err.textContent = "Insira a Licença de Uso em Termos antes de avançar."; return; }
+
+    if (!store.getLicense()) { err.textContent = "Insira a Licença de Uso em Termos antes de avançar."; return; }
     if (!canAdvanceChapter(story)) return;
+
+    const nextBtn = root.querySelector("#next");
+    nextBtn.disabled = true;
+    const oldText = nextBtn.textContent;
+    nextBtn.textContent = "Gerando próximo capítulo...";
 
     nextChapterInit(story);
 
@@ -554,20 +615,29 @@ function renderStory(storyId) {
       story.pendingChoiceAt = 1;
       story.stage = 50;
 
+      addPageSnapshot(story, `Capítulo ${story.chapter} • 50%`);
+
       if (store.deathHeuristic(story, seg.text)) {
         story.status = "ended";
         story.pendingChoices = null;
         story.pendingChoiceAt = null;
         story.stage = 100;
+        addPageSnapshot(story, `Capítulo ${story.chapter} • Encerrada`);
       }
+
       saveStory(story);
+      refreshPageOptions();
       renderText();
       renderControls();
     } catch(e){
       err.textContent = e?.message || "Erro ao chamar Gemini.";
+    } finally {
+      nextBtn.disabled = false;
+      nextBtn.textContent = oldText;
     }
   });
 
+  refreshPageOptions();
   renderText();
   renderControls();
   app.appendChild(root);
@@ -576,6 +646,8 @@ function renderStory(storyId) {
 function renderDetails(storyId) {
   const story = getStory(storyId);
   if (!story) { location.hash = "#/stories"; return; }
+  story.pages = Array.isArray(story.pages) ? story.pages : [];
+
   app.innerHTML = "";
   const root = el(`
     <div class="card">
@@ -586,7 +658,8 @@ function renderDetails(storyId) {
         Capítulo atual: ${story.chapter}<br/>
         Tom: ${escapeHtml(story.tone)} | Classificação: ${escapeHtml(story.ageRating)} | Primeira Pessoa: ${story.firstPerson ? "Sim" : "Não"}<br/>
         Criada em: ${new Date(story.createdAt).toLocaleString()}<br/>
-        Atualizada em: ${new Date(story.updatedAt).toLocaleString()}
+        Atualizada em: ${new Date(story.updatedAt).toLocaleString()}<br/>
+        Páginas salvas: ${story.pages.length}
       </div>
 
       <div class="hr"></div>
@@ -620,7 +693,7 @@ function renderDetails(storyId) {
   root.querySelector("#del").addEventListener("click", ()=>{
     deleteStory(storyId);
     root.querySelector("#msg").textContent = "História deletada.";
-    setTimeout(()=> { location.hash = "#/stories"; }, 400);
+    setTimeout(()=> { location.hash = "#/stories"; }, 350);
   });
 
   app.appendChild(root);

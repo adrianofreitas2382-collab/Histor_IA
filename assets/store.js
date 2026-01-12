@@ -22,7 +22,8 @@ export const store = {
   getLicense(){ return localStorage.getItem(LS_LICENSE) || ""; },
   setLicense(v){ if (!v) localStorage.removeItem(LS_LICENSE); else localStorage.setItem(LS_LICENSE, v); },
 
-  getModel(){ return localStorage.getItem(LS_MODEL) || "gemini-2.0-flash"; },
+  // Default já em 2.5, já que você confirmou que funciona
+  getModel(){ return localStorage.getItem(LS_MODEL) || "gemini-2.5-flash"; },
   setModel(v){ if (!v) localStorage.removeItem(LS_MODEL); else localStorage.setItem(LS_MODEL, v); },
 
   getAudioSettings(){
@@ -71,10 +72,27 @@ export function createStory(payload){
     pendingChoiceAt: null,
 
     choices: [],
+    pages: [],
 
     createdAt,
     updatedAt: createdAt
   };
+}
+
+export function addPageSnapshot(story, label){
+  const at = nowIso();
+  const id = `${story.chapter}-${story.stage}-${at}`;
+  const text = String(story.fullText || "").trim();
+  story.pages = Array.isArray(story.pages) ? story.pages : [];
+  const last = story.pages[story.pages.length - 1];
+  if (!last || last.text !== text) {
+    story.pages.push({ id, label, text, at, chapter: story.chapter, stage: story.stage });
+  }
+}
+
+export function getPageById(story, pageId){
+  if (!story?.pages) return null;
+  return story.pages.find(p => p.id === pageId) || null;
 }
 
 export function saveStory(story){

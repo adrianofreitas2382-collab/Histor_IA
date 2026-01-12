@@ -2,15 +2,18 @@
 
 Pacote 100% estático (HTML/CSS/JS).
 
-## Uso local
+## Uso
 1. Abra `index.html`.
-2. Vá em **Termos** e salve a **Licença de Uso (Gemini)**.
-3. Em **Controles**, selecione o **Modelo Gemini** (padrão: gemini-2.0-flash).
-4. Inicie a história.
+2. Termos → salve a **Licença de Uso (Gemini)**.
+3. Controles → selecione o **Modelo Gemini** (padrão: gemini-2.5-flash).
+4. Crie a história.
+
+## Livro / páginas
+A cada avanço (geração 50%, 90%, conclusão e início de capítulo), o HistorIA salva um “snapshot” (página).
+No leitor, você pode voltar e ler páginas anteriores (somente leitura, sem alterar nada).
 
 ## GitHub Pages (somente GitHub)
 Settings → Pages → Deploy from a branch → main / (root)
 
-## Observações
-- A licença é salva somente no navegador (localStorage).
-- Persistência das histórias também é local (localStorage).
+## Segurança
+A licença é salva apenas no navegador (localStorage) e não é versionada.
