@@ -50,17 +50,17 @@ export const store = {
   }
 };
 
-export function createStory({title,premise,nuclei,tone,ageRating,firstPerson}){
+export function createStory(payload){
   const storyId = rid();
   const createdAt = nowIso();
   return {
     storyId,
-    title: (title||"História sem título").slice(0,80),
-    premise: (premise||"").slice(0,2000),
-    nuclei: (nuclei||"").slice(0,600),
-    tone: (tone||"Aventura").slice(0,40),
-    ageRating: (ageRating||"14+").slice(0,10),
-    firstPerson: !!firstPerson,
+    title: (payload.title||"").slice(0,80),
+    premise: (payload.premise||"").slice(0,2000),
+    nuclei: (payload.nuclei||"").slice(0,600),
+    tone: (payload.tone||"Aventura").slice(0,40),
+    ageRating: (payload.ageRating||"14+").slice(0,10),
+    firstPerson: !!payload.firstPerson,
 
     status: "active",
     chapter: 1,
@@ -86,6 +86,12 @@ export function saveStory(story){
   writeDb(db);
 }
 
+export function deleteStory(storyId){
+  const db = readDb();
+  db.stories = db.stories.filter(s => s.storyId !== storyId);
+  writeDb(db);
+}
+
 export function getStory(storyId){
   const db = readDb();
   return db.stories.find(s => s.storyId === storyId) || null;
@@ -95,11 +101,26 @@ export function listStories(){
   const db = readDb();
   return db.stories.map(s => ({
     storyId: s.storyId,
-    title: s.title,
+    title: s.title || "(sem título)",
     status: s.status,
     chapter: s.chapter,
-    updatedAt: s.updatedAt
+    updatedAt: s.updatedAt,
+    stage: s.stage
   }));
+}
+
+export function findDuplicate(payload){
+  const db = readDb();
+  const norm = (v)=>String(v||"").trim();
+  return db.stories.find(s =>
+    norm(s.title) === norm(payload.title) &&
+    norm(s.premise) === norm(payload.premise) &&
+    norm(s.nuclei) === norm(payload.nuclei) &&
+    norm(s.tone) === norm(payload.tone) &&
+    norm(s.ageRating) === norm(payload.ageRating) &&
+    !!s.firstPerson === !!payload.firstPerson &&
+    s.status === "active"
+  ) || null;
 }
 
 export function addChoice(story, choiceIndex){

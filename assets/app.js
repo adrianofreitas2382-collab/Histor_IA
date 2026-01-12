@@ -1,10 +1,17 @@
-import { store, createStory, listStories, getStory, saveStory, addChoice, resetPending, canAdvanceChapter, nextChapterInit } from "./store.js";
+import { store, createStory, findDuplicate, listStories, getStory, saveStory, deleteStory, addChoice, resetPending, canAdvanceChapter, nextChapterInit } from "./store.js";
 import { tts } from "./tts.js";
 import { geminiGenerateSegment } from "./gemini.js";
 
 const app = document.getElementById("app");
+const badgeModel = document.getElementById("badgeModel");
+
+function updateBadge(){
+  badgeModel.textContent = `3.0 • Static • ${store.getModel()}`;
+}
+updateBadge();
 
 function route() {
+  updateBadge();
   const hash = location.hash || "#/";
   const [path, id, sub] = hash.replace("#/", "").split("/");
   if (!path) return renderHome();
@@ -25,6 +32,13 @@ function el(html) {
   return t.content.firstElementChild;
 }
 
+function escapeHtml(s="") {
+  return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
+}
+function escapeAttr(s="") {
+  return escapeHtml(s).replace(/"/g, "&quot;");
+}
+
 function renderHome() {
   const s = store.getAudioSettings();
   app.innerHTML = "";
@@ -38,19 +52,19 @@ function renderHome() {
         </p>
 
         <label>Título</label>
-        <input id="title" value="Operação Céu Limpo" />
+        <input id="title" placeholder="Ex.: Operação Céu Limpo" />
 
         <label>Breve enredo (premissa)</label>
-        <textarea id="premise">Uma conspiração silenciosa ameaça uma cidade. Um grupo improvável precisa agir antes que seja tarde.</textarea>
+        <textarea id="premise" placeholder="Descreva em 2–5 linhas o ponto de partida da história"></textarea>
 
         <label>Núcleos desejados (separe por ponto e vírgula)</label>
-        <input id="nuclei" value="Investigação; Conflito moral; Ação tática; Drama humano" />
+        <input id="nuclei" placeholder="Ex.: Investigação; Conflito moral; Ação tática; Drama humano" />
 
         <div class="split">
           <div>
             <label>Tom</label>
             <select id="tone">
-              ${["Aventura","Mistério","Drama","Ação","Fantasia","Terror","Romance"].map(x=>`<option ${x==="Mistério"?"selected":""}>${x}</option>`).join("")}
+              ${["Aventura","Mistério","Drama","Ação","Fantasia","Terror","Romance"].map(x=>`<option>${x}</option>`).join("")}
             </select>
           </div>
           <div>
@@ -79,6 +93,7 @@ function renderHome() {
 
         <p class="muted" style="margin-top:16px;">Narração: PT-BR (Web Speech API). Ajuste em <b>Controles</b>.</p>
         <p class="muted">Velocidade atual: <b>${s.rate.toFixed(2)}</b> • Volume: <b>${Math.round(s.volume*100)}%</b></p>
+        <p class="muted">Modelo Gemini atual: <b>${escapeHtml(store.getModel())}</b></p>
 
         <div class="error" id="err" style="margin-top:12px;"></div>
       </div>
@@ -101,22 +116,32 @@ function renderHome() {
   app.querySelector("#start").addEventListener("click", async () => {
     const err = app.querySelector("#err");
     err.textContent = "";
-    const license = store.getLicense();
-    if (!license) {
+
+    const apiKey = store.getLicense();
+    if (!apiKey) {
       err.textContent = "Insira a Licença de Uso em Termos e Condições antes de iniciar.";
       return;
     }
 
-    const title = app.querySelector("#title").value.trim();
-    const premise = app.querySelector("#premise").value.trim();
-    const nuclei = app.querySelector("#nuclei").value.trim();
-    const tone = app.querySelector("#tone").value;
-    const ageRating = app.querySelector("#age").value;
-    const firstPerson = app.querySelector("#fp").checked;
+    const payload = {
+      title: app.querySelector("#title").value.trim(),
+      premise: app.querySelector("#premise").value.trim(),
+      nuclei: app.querySelector("#nuclei").value.trim(),
+      tone: app.querySelector("#tone").value,
+      ageRating: app.querySelector("#age").value,
+      firstPerson: app.querySelector("#fp").checked
+    };
 
-    if (!premise) { err.textContent = "Premissa é obrigatória."; return; }
+    if (!payload.premise) { err.textContent = "Premissa é obrigatória."; return; }
 
-    const story = createStory({ title, premise, nuclei, tone, ageRating, firstPerson });
+    // Evita duplicidade: se existir uma ativa com os mesmos dados, apenas abre
+    const dup = findDuplicate(payload);
+    if (dup) {
+      location.hash = `#/story/${dup.storyId}`;
+      return;
+    }
+
+    const story = createStory(payload);
     saveStory(story);
 
     const startBtn = app.querySelector("#start");
@@ -159,6 +184,7 @@ function renderStories() {
     </div>
   `);
   const list = root.querySelector("#list");
+
   if (items.length === 0) {
     list.appendChild(el(`<p class="muted">Nenhuma história criada ainda.</p>`));
   } else {
@@ -168,18 +194,54 @@ function renderStories() {
           <div class="row" style="justify-content:space-between;">
             <div>
               <div style="font-weight:700;">${escapeHtml(s.title)}</div>
-              <div class="muted">Status: ${s.status} | Capítulo: ${s.chapter} | Atualizado: ${new Date(s.updatedAt).toLocaleString()}</div>
+              <div class="muted">Status: ${s.status} | Capítulo: ${s.chapter} | Estágio: ${s.stage}% | Atualizado: ${new Date(s.updatedAt).toLocaleString()}</div>
             </div>
             <div class="row">
+              <button class="btn secondary" data-action="refresh" data-id="${s.storyId}">Atualizar</button>
               <a class="pill" href="#/story/${s.storyId}">Continuar</a>
               <a class="pill" href="#/story/${s.storyId}/details">Exibir detalhes</a>
             </div>
           </div>
+          <div class="error" data-err="${s.storyId}" style="margin-top:10px;"></div>
         </div>
       `);
       list.appendChild(d);
     });
   }
+
+  // Atualizar: se estágio == 0, tenta gerar 50% inicial. Caso contrário, apenas recarrega estado.
+  root.querySelectorAll('button[data-action="refresh"]').forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const storyId = btn.dataset.id;
+      const errEl = root.querySelector(`[data-err="${storyId}"]`);
+      errEl.textContent = "";
+      const story = getStory(storyId);
+      if (!story) return;
+
+      if (story.stage === 0 && story.status === "active") {
+        try{
+          btn.disabled = true;
+          btn.textContent = "Gerando...";
+          const seg = await geminiGenerateSegment(story, 0);
+          story.fullText = seg.text.trim();
+          story.pendingChoices = seg.choices;
+          story.pendingChoiceAt = 1;
+          story.stage = 50;
+          saveStory(story);
+          location.hash = `#/story/${storyId}`;
+        } catch(e){
+          errEl.textContent = e?.message || "Erro ao regenerar.";
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Atualizar";
+        }
+      } else {
+        // apenas recarrega listagem (força rerender)
+        renderStories();
+      }
+    });
+  });
+
   app.appendChild(root);
 }
 
@@ -206,11 +268,25 @@ function renderTutorial() {
 
 function renderControls() {
   const s = store.getAudioSettings();
+  const currentModel = store.getModel();
   app.innerHTML = "";
   const root = el(`
     <div class="card">
       <h2 class="title">Controles</h2>
-      <p class="muted">Ajuste a narração (Web Speech API) em PT-BR.</p>
+      <p class="muted">Ajuste a narração (Web Speech API) em PT-BR e o modelo do Gemini.</p>
+      <div class="hr"></div>
+
+      <label>Modelo Gemini</label>
+      <select id="model">
+        ${[
+          "gemini-2.0-flash",
+          "gemini-2.0-flash-lite",
+          "gemini-flash-latest",
+          "gemini-2.5-flash"
+        ].map(m => `<option value="${m}" ${m===currentModel?"selected":""}>${m}</option>`).join("")}
+      </select>
+      <p class="muted">Modelo atual: <b id="modelV">${escapeHtml(currentModel)}</b></p>
+
       <div class="hr"></div>
 
       <label>Velocidade</label>
@@ -230,20 +306,31 @@ function renderControls() {
       <p class="muted" style="margin-top:18px;">Observação: a disponibilidade de vozes depende do navegador e do sistema operacional.</p>
     </div>
   `);
+
+  root.querySelector("#model").addEventListener("change", (e)=>{
+    const v = e.target.value;
+    store.setModel(v);
+    root.querySelector("#modelV").textContent = v;
+    updateBadge();
+  });
+
   root.querySelector("#rate").addEventListener("input", (e)=>{
     const rate = Number(e.target.value);
     store.setAudioSettings({ ...store.getAudioSettings(), rate });
     root.querySelector("#rateV").textContent = rate.toFixed(2);
   });
+
   root.querySelector("#vol").addEventListener("input", (e)=>{
     const volume = Number(e.target.value);
     store.setAudioSettings({ ...store.getAudioSettings(), volume });
     root.querySelector("#volV").textContent = `${Math.round(volume*100)}%`;
   });
+
   root.querySelector("#voice").addEventListener("change", (e)=>{
     const voiceHint = e.target.value;
     store.setAudioSettings({ ...store.getAudioSettings(), voiceHint });
   });
+
   app.appendChild(root);
 }
 
@@ -303,7 +390,7 @@ function renderStory(storyId) {
       <div class="card">
         <div class="row" style="justify-content:space-between;">
           <div>
-            <h2 class="title" style="margin-bottom:8px;">${escapeHtml(story.title)}</h2>
+            <h2 class="title" style="margin-bottom:8px;">${escapeHtml(story.title || "(sem título)")}</h2>
             <div class="muted">Status: ${story.status} | Capítulo: ${story.chapter} | Estágio: ${story.stage}%</div>
           </div>
           <div class="row">
@@ -345,7 +432,8 @@ function renderStory(storyId) {
         <h2 class="title">Informações</h2>
         <p class="muted">Fluxo fixo por capítulo: 50% → Escolha 1 (3 opções) → 90% → Escolha 2 (3 opções) → conclusão.</p>
         <div class="hr"></div>
-        <p class="muted">Núcleo: Gemini (chamada direta via navegador). Configure a Licença de Uso em <a href="#/terms"><u>Termos</u></a>.</p>
+        <p class="muted">Modelo Gemini atual: <b>${escapeHtml(store.getModel())}</b></p>
+        <p class="muted">Configure Licença de Uso em <a href="#/terms"><u>Termos</u></a>.</p>
       </div>
     </div>
   `);
@@ -390,8 +478,8 @@ function renderStory(storyId) {
   async function choose(index) {
     err.textContent = "";
     tts.stop();
-    const license = store.getLicense();
-    if (!license) { err.textContent = "Insira a Licença de Uso em Termos antes de continuar."; return; }
+    const apiKey = store.getLicense();
+    if (!apiKey) { err.textContent = "Insira a Licença de Uso em Termos antes de continuar."; return; }
     if (!story.pendingChoices) return;
 
     addChoice(story, index);
@@ -453,8 +541,8 @@ function renderStory(storyId) {
   root.querySelector("#next").addEventListener("click", async ()=>{
     err.textContent = "";
     tts.stop();
-    const license = store.getLicense();
-    if (!license) { err.textContent = "Insira a Licença de Uso em Termos antes de avançar."; return; }
+    const apiKey = store.getLicense();
+    if (!apiKey) { err.textContent = "Insira a Licença de Uso em Termos antes de avançar."; return; }
     if (!canAdvanceChapter(story)) return;
 
     nextChapterInit(story);
@@ -493,7 +581,7 @@ function renderDetails(storyId) {
     <div class="card">
       <h2 class="title">Detalhes</h2>
       <div class="muted">
-        <b>${escapeHtml(story.title)}</b><br/>
+        <b>${escapeHtml(story.title || "(sem título)")}</b><br/>
         Status: ${story.status}<br/>
         Capítulo atual: ${story.chapter}<br/>
         Tom: ${escapeHtml(story.tone)} | Classificação: ${escapeHtml(story.ageRating)} | Primeira Pessoa: ${story.firstPerson ? "Sim" : "Não"}<br/>
@@ -519,14 +607,21 @@ function renderDetails(storyId) {
           ${story.choices.map(c => `<li>Capítulo ${c.chapter} — Pausa ${c.pause}: <b>${escapeHtml(c.choice)}</b> (${new Date(c.at).toLocaleString()})</li>`).join("")}
         </ul>
       `}
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <button class="btn danger" id="del">Deletar História</button>
+        <span class="muted" id="msg"></span>
+      </div>
     </div>
   `);
-  app.appendChild(root);
-}
 
-function escapeHtml(s="") {
-  return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[m]));
-}
-function escapeAttr(s="") {
-  return escapeHtml(s).replace(/"/g, "&quot;");
+  root.querySelector("#del").addEventListener("click", ()=>{
+    deleteStory(storyId);
+    root.querySelector("#msg").textContent = "História deletada.";
+    setTimeout(()=> { location.hash = "#/stories"; }, 400);
+  });
+
+  app.appendChild(root);
 }

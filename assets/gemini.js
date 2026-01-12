@@ -84,8 +84,8 @@ function parseOutput(raw){
 }
 
 export async function geminiGenerateSegment(story, stage){
-  const key = store.getLicense();
-  if (!key) throw new Error("Licença de Uso ausente. Vá em Termos e Condições.");
+  const apiKey = store.getLicense();
+  if (!apiKey) throw new Error("Licença de Uso ausente. Vá em Termos e Condições.");
 
   const prompt = `
 ${baseRules(story)}
@@ -96,15 +96,12 @@ ${story.fullText || "(vazio)"}
 ${segmentInstruction(stage)}
 `;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent?key=${encodeURIComponent(key)}`;
-  const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.9, topP: 0.95, maxOutputTokens: 1200 }
-  };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent`;
+  const body = { contents: [{ parts: [{ text: prompt }] }] };
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type":"application/json" },
+    headers: { "Content-Type":"application/json", "X-goog-api-key": apiKey },
     body: JSON.stringify(body)
   });
 

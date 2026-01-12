@@ -1,20 +1,16 @@
 # HistorIA 3.0 — Static (GitHub Pages)
 
-Este pacote é **100% estático** (somente arquivos HTML/CSS/JS).
-Você pode:
-- abrir `index.html` diretamente no navegador, ou
-- publicar no **GitHub Pages**.
+Pacote 100% estático (HTML/CSS/JS).
 
 ## Uso local
 1. Abra `index.html`.
 2. Vá em **Termos** e salve a **Licença de Uso (Gemini)**.
-3. (Opcional) Em **Controles**, escolha o **Modelo (Gemini)**.
+3. Em **Controles**, selecione o **Modelo Gemini** (padrão: gemini-2.0-flash).
 4. Inicie a história.
 
-## Publicar no GitHub Pages (somente GitHub)
-1. Suba estes arquivos na raiz do repositório.
-2. GitHub → Settings → Pages → Deploy from a branch → main / (root).
-3. Abra a URL do Pages.
+## GitHub Pages (somente GitHub)
+Settings → Pages → Deploy from a branch → main / (root)
 
-## Segurança
-A “Licença de Uso” é armazenada apenas no navegador (localStorage) e não é versionada.
+## Observações
+- A licença é salva somente no navegador (localStorage).
+- Persistência das histórias também é local (localStorage).

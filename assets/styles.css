@@ -62,6 +62,7 @@ input, select, textarea{
   color:var(--text);
   font-size:14px;
 }
+input::placeholder, textarea::placeholder{ color: rgba(154,166,199,0.55); }
 input:focus, select:focus, textarea:focus{
   outline:none; border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(107,140,255,0.3);
@@ -78,6 +79,7 @@ textarea{ min-height:130px; resize:vertical; }
 }
 .btn:hover{ background: var(--accent-strong); }
 .btn.secondary{ background: var(--glass); }
+.btn.danger{ background: rgba(255,107,107,0.22); }
 .btn:disabled{ opacity:0.45; cursor:not-allowed; }
 .row{ display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
 .split{ display:flex; gap:16px; }
