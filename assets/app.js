@@ -1,4 +1,4 @@
-import { store, createStory, findDuplicate, listStories, getStory, saveStory, deleteStory, addChoice, resetPending, canAdvanceChapter, nextChapterInit, addPageSnapshot, getPageById } from "./store.js";
+import { store, createStory, findDuplicate, listStories, getStory, saveStory, deleteStory, addChoice, resetPending, canAdvanceChapter, nextChapterInit, addPageSnapshot, getPageById, archiveCurrentAsPage } from "./store.js";
 import { tts } from "./tts.js";
 import { geminiGenerateSegment } from "./gemini.js";
 
@@ -148,14 +148,11 @@ function renderHome() {
       story.pendingChoiceAt = 1;
       story.stage = 50;
 
-      addPageSnapshot(story, `Capítulo ${story.chapter} • 50%`);
-
       if (store.deathHeuristic(story, seg.text)) {
         story.status = "ended";
         story.pendingChoices = null;
         story.pendingChoiceAt = null;
         story.stage = 100;
-        addPageSnapshot(story, `Capítulo ${story.chapter} • Encerrada`);
       }
 
       saveStory(story);
@@ -222,7 +219,6 @@ function renderStories() {
           story.pendingChoices = seg.choices;
           story.pendingChoiceAt = 1;
           story.stage = 50;
-          addPageSnapshot(story, `Capítulo ${story.chapter} • 50%`);
           saveStory(story);
           location.hash = `#/story/${storyId}`;
         } catch(e){
@@ -380,10 +376,6 @@ function renderStory(storyId) {
   if (!story) { location.hash = "#/stories"; return; }
 
   story.pages = Array.isArray(story.pages) ? story.pages : [];
-  if ((story.fullText || "").trim() && story.pages.length === 0) {
-    addPageSnapshot(story, `Capítulo ${story.chapter} • ${story.stage}%`);
-    saveStory(story);
-  }
 
   app.innerHTML = "";
   const root = el(`
@@ -407,12 +399,12 @@ function renderStory(storyId) {
           <button class="btn secondary" id="stop">Parar</button>
         </div>
 
-        <div class="row" style="margin-top:12px;">
-          <div style="flex:1; min-width:280px;">
-            <label style="margin:0 0 6px;">Leitura (páginas)</label>
-            <select id="pageSel"></select>
-            <div class="muted" style="margin-top:10px;">Ao selecionar uma página anterior, a leitura é apenas consultiva.</div>
+        <div class="row" style="margin-top:12px; justify-content:space-between;">
+          <div class="pager">
+            <button class="pagerBtn" id="prevPage" title="Página anterior">&lt;&lt;</button>
+            <button class="pagerBtn" id="nextPage" title="Próxima página">&gt;&gt;</button>
           </div>
+          <div class="pagerLabel" id="pageLabel"></div>
         </div>
 
         <div class="error" id="err" style="margin-top:12px;"></div>
@@ -449,46 +441,65 @@ function renderStory(storyId) {
 
   const err = root.querySelector("#err");
   const textBox = root.querySelector("#text");
-  const pageSel = root.querySelector("#pageSel");
-  let viewPageId = "CURRENT";
+  const prevBtn = root.querySelector("#prevPage");
+  const nextBtn = root.querySelector("#nextPage");
+  const pageLabel = root.querySelector("#pageLabel");
 
-  function refreshPageOptions(){
-    pageSel.innerHTML = "";
-    const cur = document.createElement("option");
-    cur.value = "CURRENT";
-    cur.textContent = `Atual (Cap ${story.chapter} • ${story.stage}%)`;
-    pageSel.appendChild(cur);
+  // Páginas: 0..pages.length-1 (arquivadas), pages.length = página atual
+  let pageIndex = (Array.isArray(story.pages) ? story.pages.length : 0);
 
-    story.pages.forEach(p => {
-      const o = document.createElement("option");
-      o.value = p.id;
-      o.textContent = `${p.label} • ${new Date(p.at).toLocaleString()}`;
-      pageSel.appendChild(o);
-    });
-
-    pageSel.value = viewPageId;
+function updatePager(){
+  const pages = Array.isArray(story.pages) ? story.pages : [];
+  const isCurrent = (pageIndex === pages.length);
+  prevBtn.disabled = (pageIndex <= 0);
+  nextBtn.disabled = (pageIndex >= pages.length);
+  if (isCurrent) {
+    pageLabel.textContent = `Página atual (CAP${story.chapter})`;
+  } else {
+    const p = pages[pageIndex];
+    pageLabel.textContent = `${p?.label || "Página"} • ${new Date(p.at).toLocaleString()}`;
   }
+}
 
-  pageSel.addEventListener("change", ()=>{
-    viewPageId = pageSel.value;
-    renderText();
+prevBtn.addEventListener("click", ()=>{
+  if (prevBtn.disabled) return;
+  pageIndex -= 1;
+  tts.stop();
+  renderText();
+  renderControls();
+  updatePager();
+});
+
+nextBtn.addEventListener("click", ()=>{
+  const pages = Array.isArray(story.pages) ? story.pages : [];
+  if (pageIndex >= pages.length) return;
+  pageIndex += 1;
+  tts.stop();
+  renderText();
+  renderControls();
+  updatePager();
+});
+
     renderControls();
   });
 
   function renderText() {
-    const page = (viewPageId !== "CURRENT") ? getPageById(story, viewPageId) : null;
-    const sourceText = page ? page.text : (story.fullText || "");
-    const parts = store.splitSentences(sourceText);
-    textBox.innerHTML = "";
-    parts.forEach((p, i) => {
-      const span = document.createElement("span");
-      span.textContent = p + " ";
-      span.dataset.i = String(i);
-      textBox.appendChild(span);
-    });
-  }
+  // Exibição por páginas: páginas antigas ficam em story.pages; o texto atual é a “página em andamento”
+  const pages = Array.isArray(story.pages) ? story.pages : [];
+  const isCurrent = (pageIndex === pages.length);
+  const sourceText = isCurrent ? (story.fullText || "") : (pages[pageIndex]?.text || "");
 
-  function setHighlight(idx) {
+  const parts = store.splitSentences(sourceText);
+  textBox.innerHTML = "";
+  parts.forEach((p, i) => {
+    const span = document.createElement("span");
+    span.textContent = p + " ";
+    span.dataset.i = String(i);
+    textBox.appendChild(span);
+  });
+}
+
+  function setHighlight  function setHighlight(idx) {
     [...textBox.querySelectorAll("span")].forEach(s => s.classList.remove("hl"));
     const e = textBox.querySelector(`span[data-i="${idx}"]`);
     if (e) e.classList.add("hl");
@@ -502,7 +513,8 @@ function renderStory(storyId) {
   }
 
   function renderControls() {
-    const isReadOnly = (viewPageId !== "CURRENT");
+    const pages = Array.isArray(story.pages) ? story.pages : [];
+    const isReadOnly = (pageIndex !== pages.length);
 
     const cb = root.querySelector("#choiceBlock");
     const pauseLabel = root.querySelector("#pauseLabel");
@@ -541,20 +553,22 @@ function renderStory(storyId) {
     try{
       if (stageBefore === 50) {
         const seg = await geminiGenerateSegment(story, 50);
-        story.fullText = (story.fullText + "\n\n" + seg.text).trim();
+        // Move o trecho anterior para páginas (CAPx_y) e exibe apenas o novo trecho
+        archiveCurrentAsPage(story);
+        story.fullText = seg.text.trim();
         story.pendingChoices = seg.choices;
         story.pendingChoiceAt = 2;
         story.stage = 90;
         addPageSnapshot(story, `Capítulo ${story.chapter} • 90%`);
       } else if (stageBefore === 90) {
         const seg = await geminiGenerateSegment(story, 90);
-        story.fullText = (story.fullText + "\n\n" + seg.text).trim();
+        archiveCurrentAsPage(story);
+        story.fullText = seg.text.trim();
         story.stage = 100;
         addPageSnapshot(story, `Capítulo ${story.chapter} • 100%`);
 
         if (store.deathHeuristic(story, seg.text)) {
           story.status = "ended";
-          addPageSnapshot(story, `Capítulo ${story.chapter} • Encerrada`);
         } else if (story.chapter >= 10) {
           story.status = "completed";
         }
@@ -563,9 +577,10 @@ function renderStory(storyId) {
       }
 
       saveStory(story);
-      refreshPageOptions();
+      pageIndex = (Array.isArray(story.pages) ? story.pages.length : 0);
       renderText();
       renderControls();
+      updatePager();
     } catch(e){
       err.textContent = e?.message || "Erro ao chamar Gemini.";
       renderControls();
@@ -577,14 +592,14 @@ function renderStory(storyId) {
     if (!updated) return;
     Object.assign(story, updated);
     story.pages = Array.isArray(story.pages) ? story.pages : [];
-    refreshPageOptions();
     renderText();
     renderControls();
   });
 
   root.querySelector("#narrate").addEventListener("click", ()=>{
-    const page = (viewPageId !== "CURRENT") ? getPageById(story, viewPageId) : null;
-    const sourceText = page ? page.text : (story.fullText || "");
+    const pages = Array.isArray(story.pages) ? story.pages : [];
+    const isCurrent = (pageIndex === pages.length);
+    const sourceText = isCurrent ? (story.fullText || "") : (pages[pageIndex]?.text || "");
     const parts = store.splitSentences(sourceText);
     tts.speak(parts, (idx)=> setHighlight(idx));
   });
@@ -610,25 +625,25 @@ function renderStory(storyId) {
 
     try{
       const seg = await geminiGenerateSegment(story, 0);
-      story.fullText = (story.fullText + "\n" + seg.text).trim();
+      // Arquiva página anterior (CAPx_y) e inicia o novo capítulo com texto novo
+      archiveCurrentAsPage(story);
+      story.fullText = seg.text.trim();
       story.pendingChoices = seg.choices;
       story.pendingChoiceAt = 1;
       story.stage = 50;
-
-      addPageSnapshot(story, `Capítulo ${story.chapter} • 50%`);
 
       if (store.deathHeuristic(story, seg.text)) {
         story.status = "ended";
         story.pendingChoices = null;
         story.pendingChoiceAt = null;
         story.stage = 100;
-        addPageSnapshot(story, `Capítulo ${story.chapter} • Encerrada`);
       }
 
       saveStory(story);
-      refreshPageOptions();
+      pageIndex = (Array.isArray(story.pages) ? story.pages.length : 0);
       renderText();
       renderControls();
+      updatePager();
     } catch(e){
       err.textContent = e?.message || "Erro ao chamar Gemini.";
     } finally {
@@ -636,10 +651,9 @@ function renderStory(storyId) {
       nextBtn.textContent = oldText;
     }
   });
-
-  refreshPageOptions();
   renderText();
   renderControls();
+  updatePager();
   app.appendChild(root);
 }
 
