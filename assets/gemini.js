@@ -2,6 +2,11 @@ import { store } from "./store.js";
 
 function model(){ return store.getModel(); }
 
+function choicesHistory(story){
+  if (!Array.isArray(story.choices) || story.choices.length === 0) return "Nenhuma.";
+  return story.choices.map(c => `Cap ${c.chapter} Pausa ${c.pause}: ${c.choice}`).join(" | ");
+}
+
 function baseRules(story){
   const pov = story.firstPerson ? "PRIMEIRA PESSOA (eu, meu, minha)" : "TERCEIRA PESSOA";
   return `
@@ -12,24 +17,25 @@ Regras inegociáveis:
 - Mantenha consistência e continuidade.
 - Não ofereça explicações meta.
 - Não mencione políticas, nem a palavra "prompt".
-- Proibido pular etapas: o controlador externo decide quando pausar e quando pedir escolhas.
+- Proibido pular etapas.
 - Se o modo Primeira Pessoa estiver ativo, o narrador é o próprio protagonista.
 
-Contexto fixo:
+Contexto:
 Título: ${story.title}
 Premissa: ${story.premise}
-Núcleos desejados: ${story.nuclei}
+Núcleos: ${story.nuclei}
 Tom: ${story.tone}
 Classificação: ${story.ageRating}
 POV: ${pov}
 Capítulo atual: ${story.chapter} de 10
+Escolhas já feitas: ${choicesHistory(story)}
 `;
 }
 
 function segmentInstruction(stage){
   if (stage === 0) return `
 Tarefa: Escreva o INÍCIO do capítulo atual (aprox. metade do capítulo).
-Ao final, gere exatamente 3 opções de escolha (curtas e claras), numeradas de 1 a 3.
+Ao final, gere exatamente 3 opções de escolha, numeradas de 1 a 3.
 Formato:
 [TEXTO]
 
@@ -40,7 +46,7 @@ Formato:
 `;
   if (stage === 50) return `
 Tarefa: Continue a história do ponto atual até aproximadamente 90% do capítulo.
-Ao final, gere exatamente 3 opções de escolha (curtas e claras), numeradas de 1 a 3.
+Ao final, gere exatamente 3 opções de escolha, numeradas de 1 a 3.
 Formato:
 [TEXTO]
 
@@ -56,6 +62,19 @@ Formato:
 [TEXTO]
 `;
   return `Tarefa: Capítulo já concluído.`;
+}
+
+function continueInstruction(){
+  return `
+Tarefa: Continue EXATAMENTE do ponto onde o texto parou.
+- Não repita trechos.
+- Não altere escolhas anteriores.
+- Mantenha o mesmo capítulo e finalize o que estiver pendente.
+Se ainda faltar concluir o capítulo, conclua. Se faltar criar escolhas, crie as escolhas exigidas.
+Formato:
+[TEXTO]
+(se for necessário escolhas, use o bloco [ESCOLHAS] com 3 opções)
+`;
 }
 
 function parseOutput(raw){
@@ -83,19 +102,7 @@ function parseOutput(raw){
   ]};
 }
 
-export async function geminiGenerateSegment(story, stage){
-  const apiKey = store.getLicense();
-  if (!apiKey) throw new Error("Licença de Uso ausente. Vá em Termos e Condições.");
-
-  const prompt = `
-${baseRules(story)}
-
-Texto acumulado até agora (use como continuidade, não repita):
-${story.fullText || "(vazio)"}
-
-${segmentInstruction(stage)}
-`;
-
+async function callGemini(prompt, apiKey){
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model()}:generateContent`;
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -114,5 +121,37 @@ ${segmentInstruction(stage)}
     throw new Error(msg);
   }
   const text = data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("") || "";
-  return parseOutput(text.trim());
+  return text.trim();
+}
+
+export async function geminiGenerateSegment(story, stage){
+  const apiKey = store.getLicense();
+  if (!apiKey) throw new Error("Licença de Uso ausente. Vá em Termos e Condições.");
+
+  const prompt = `
+${baseRules(story)}
+
+Texto acumulado até agora (use como continuidade, não repita):
+${story.fullText || "(vazio)"}
+
+${segmentInstruction(stage)}
+`;
+  const raw = await callGemini(prompt, apiKey);
+  return parseOutput(raw);
+}
+
+export async function geminiContinue(story){
+  const apiKey = store.getLicense();
+  if (!apiKey) throw new Error("Licença de Uso ausente. Vá em Termos e Condições.");
+
+  const prompt = `
+${baseRules(story)}
+
+Texto atual (últimas linhas são o ponto de continuação):
+${story.fullText || "(vazio)"}
+
+${continueInstruction()}
+`;
+  const raw = await callGemini(prompt, apiKey);
+  return parseOutput(raw);
 }
