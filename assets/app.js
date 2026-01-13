@@ -306,7 +306,7 @@ function isLikelyIncomplete(text){
   if (!t) return true;
   const last = t.slice(-1);
   // heurística simples: se termina sem pontuação final e o texto é longo, provavelmente cortou
-  return (t.length > 200 && ![".","!","?","”","""].includes(last));
+  return (t.length > 200 && ![".","!","?","”",""].includes(last));
 }
 
 function renderStory(storyId) {
